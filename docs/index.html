@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PieceWork — milestone escrow for freelance work (simulation)</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; line-height: 1.45; }
+  main { max-width: 880px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { margin-bottom: 4px; }
+  .sub { opacity: .75; margin-top: 0; }
+  .notice { border: 2px solid #b58900; background: rgba(181,137,0,.12); padding: 12px 14px; border-radius: 8px; }
+  .card { border: 1px solid rgba(128,128,128,.4); border-radius: 10px; padding: 16px; margin: 16px 0; }
+  .row { display: flex; flex-wrap: wrap; gap: 12px; }
+  .row > * { flex: 1 1 180px; }
+  label { display: block; font-size: .85em; font-weight: 600; margin: 8px 0 4px; }
+  input, select, button { font: inherit; padding: 7px 9px; border-radius: 6px; border: 1px solid rgba(128,128,128,.55); }
+  button { cursor: pointer; font-weight: 600; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border-bottom: 1px solid rgba(128,128,128,.35); padding: 7px 8px; text-align: left; }
+  .bal { font-size: 1.35em; font-weight: 700; }
+  .ok { color: #1a7f37; } .bad { color: #cf222e; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: .8em; border: 1px solid rgba(128,128,128,.55); }
+  #log { list-style: none; padding: 0; margin: 0; font-family: ui-monospace, monospace; font-size: .86em; }
+  #log li { padding: 5px 8px; border-bottom: 1px dashed rgba(128,128,128,.3); }
+  #log li.rej { color: #cf222e; }
+  code { font-family: ui-monospace, monospace; }
+</style>
+</head>
+<body>
+<main>
+  <h1>PieceWork</h1>
+  <p class="sub">Milestone escrow for freelance work on Tari Ootle.</p>
+
+  <div class="notice">
+    <strong>This page is a simulation.</strong> It mirrors, rule for rule, the
+    PieceWork Rust template for the Tari Ootle engine that lives in this
+    repository (<code>src/lib.rs</code>), and it runs entirely in your browser
+    with pretend balances. There is <strong>no wallet, no network and no real
+    TARI</strong> involved. The on-chain artifact is the template plus its
+    engine tests (<code>cargo test</code>); this page is the judge path — the
+    quickest way to see exactly what the template allows and what it rejects.
+    The template has not been published to any network.
+  </div>
+
+  <div class="card">
+    <h2>1. Create an agreement</h2>
+    <div class="row">
+      <div>
+        <label for="payeeName">Payee (freelancer)</label>
+        <input id="payeeName" value="Rani the designer">
+      </div>
+      <div>
+        <label for="deadline">Deadline (epoch)</label>
+        <input id="deadline" type="number" value="10" min="1">
+      </div>
+    </div>
+    <label for="milestones">Milestone amounts (TARI, comma separated)</label>
+    <input id="milestones" value="300, 200" style="width:100%">
+    <p>Current epoch: <strong id="epochNow">0</strong>
+       <button id="advanceEpoch" type="button">Advance epoch +1</button></p>
+    <button id="createBtn" type="button">Create agreement</button>
+    <span id="createMsg"></span>
+  </div>
+
+  <div class="card" id="agreementCard" hidden>
+    <h2>2. Agreement</h2>
+    <p>Status: <span class="pill" id="statusPill">open</span>
+       &nbsp;Total: <strong id="totalAmt">0</strong> TARI
+       &nbsp;Funded: <strong id="fundedAmt">0</strong>
+       &nbsp;Released: <strong id="releasedAmt">0</strong>
+       &nbsp;Deadline: epoch <strong id="deadlineEcho">0</strong></p>
+
+    <div class="row">
+      <div><div>Client wallet</div><div class="bal" id="payerBal">1,000 TARI</div></div>
+      <div><div>Escrow vault</div><div class="bal" id="vaultBal">0 TARI</div></div>
+      <div><div>Payee wallet</div><div class="bal" id="payeeBal">0 TARI</div></div>
+    </div>
+
+    <label for="actor">Acting as (the transaction signer)</label>
+    <select id="actor">
+      <option value="payer">Client (payer)</option>
+      <option value="payee">Payee (freelancer)</option>
+      <option value="stranger">A stranger</option>
+    </select>
+
+    <div class="row" style="margin-top:10px">
+      <div>
+        <label for="fundAmt">Fund amount (TARI)</label>
+        <input id="fundAmt" type="number" value="500" min="0">
+        <button id="fundBtn" type="button">Fund</button>
+      </div>
+      <div>
+        <label>Agreement level</label>
+        <button id="refundBtn" type="button">Refund unreleased</button>
+        <button id="cancelBtn" type="button">Cancel agreement</button>
+      </div>
+    </div>
+
+    <h3>Milestones</h3>
+    <table>
+      <thead><tr><th>#</th><th>Amount</th><th>Delivered</th><th>Released</th><th>Actions</th></tr></thead>
+      <tbody id="msBody"></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Action log</h2>
+    <ul id="log"></ul>
+  </div>
+
+  <p class="sub">PieceWork is an entry to the Tari November Build Contest (theme: MVP).
+  Template rules enforced identically here and on-chain: only the payer funds, approves and
+  refunds; only the payee marks delivery; no release without delivery and funding; no
+  double release; refunds only at/after the deadline; cancellation only while unfunded.</p>
+</main>
+
+<script>
+"use strict";
+// --- PieceWork simulation engine: a line-for-line mirror of src/lib.rs ---
+// Amounts are handled in micro-TARI (µT) internally, like the template.
+const MICRO = 1_000_000;
+let epoch = 0;
+let agreement = null; // {payer, payee, milestones:[{amount,delivered,released}], fundedTotal, releasedTotal, deadline, cancelled, closed}
+let wallets = { payer: 1000 * MICRO, payee: 0 };
+
+const $ = id => document.getElementById(id);
+function fmt(micro) {
+  const v = micro / MICRO;
+  return (Number.isInteger(v) ? v.toLocaleString("en-US") : v.toFixed(6)) + " TARI";
+}
+function log(msg, rejected) {
+  const li = document.createElement("li");
+  li.textContent = (rejected ? "✗ REJECTED — " : "✓ ") + msg;
+  if (rejected) li.className = "rej";
+  $("log").prepend(li);
+}
+function reject(msg) { log(msg, true); render(); }
+function assert(cond, msg) { if (!cond) throw new Error(msg); }
+
+// The following functions mirror the template's methods, including the exact
+// assertion messages used in src/lib.rs.
+function tplNew(payeeName, milestoneAmounts, deadlineEpoch) {
+  assert(payeeName !== "payer", "payee must differ from the payer (the creator)");
+  assert(milestoneAmounts.length > 0, "at least one milestone is required");
+  assert(milestoneAmounts.every(m => m > 0), "every milestone amount must be greater than zero");
+  assert(deadlineEpoch > epoch, "deadline_epoch must be in the future");
+  return {
+    payer: "payer", payee: payeeName,
+    milestones: milestoneAmounts.map(a => ({ amount: a, delivered: false, released: false })),
+    fundedTotal: 0, releasedTotal: 0, deadline: deadlineEpoch,
+    cancelled: false, closed: false, vault: 0
+  };
+}
+function assertOpen(a) {
+  assert(!a.cancelled, "agreement has been cancelled");
+  assert(!a.closed, "agreement has been closed by a refund");
+}
+function tplFund(a, actor, amount) {
+  assertOpen(a);
+  assert(actor === a.payer, "only the payer can perform this action");
+  assert(amount > 0, "funding bucket must not be empty");
+  const total = a.milestones.reduce((s, m) => s + m.amount, 0);
+  assert(a.fundedTotal + amount <= total, "funding exceeds the total milestone amount");
+  assert(wallets.payer >= amount, "client wallet balance is too low (simulation wallet check)");
+  wallets.payer -= amount; a.vault += amount; a.fundedTotal += amount;
+}
+function tplMarkDelivered(a, actor, i) {
+  assertOpen(a);
+  assert(actor === "payee", "only the payee can perform this action");
+  const m = a.milestones[i];
+  assert(m, "milestone index out of range");
+  assert(!m.released, "milestone already released");
+  assert(!m.delivered, "milestone already marked delivered");
+  m.delivered = true;
+}
+function tplApprove(a, actor, i) {
+  assertOpen(a);
+  assert(actor === a.payer, "only the payer can perform this action");
+  const m = a.milestones[i];
+  assert(m, "milestone index out of range");
+  assert(m.delivered, "milestone has not been marked delivered");
+  assert(!m.released, "milestone already released");
+  assert(a.vault >= m.amount, "agreement is not funded enough to release this milestone");
+  m.released = true; a.releasedTotal += m.amount; a.vault -= m.amount;
+  wallets.payee += m.amount;
+}
+function tplRefund(a, actor) {
+  assertOpen(a);
+  assert(actor === a.payer, "only the payer can perform this action");
+  assert(epoch >= a.deadline, "unreleased funds are only refundable at or after the deadline");
+  assert(a.vault > 0, "nothing left to refund");
+  const amount = a.vault; a.vault = 0; a.closed = true;
+  wallets.payer += amount;
+  return amount;
+}
+function tplCancel(a, actor) {
+  assertOpen(a);
+  assert(actor === a.payer || actor === "payee", "only the payer or the payee can cancel the agreement");
+  assert(a.fundedTotal === 0 && a.vault === 0, "only an unfunded agreement can be cancelled");
+  a.cancelled = true;
+}
+
+// --- UI wiring ---
+function render() {
+  $("epochNow").textContent = epoch;
+  if (!agreement) return;
+  $("agreementCard").hidden = false;
+  const a = agreement;
+  const total = a.milestones.reduce((s, m) => s + m.amount, 0);
+  $("statusPill").textContent = a.cancelled ? "cancelled" : a.closed ? "closed (refunded)" : "open";
+  $("totalAmt").textContent = fmt(total);
+  $("fundedAmt").textContent = fmt(a.fundedTotal);
+  $("releasedAmt").textContent = fmt(a.releasedTotal);
+  $("deadlineEcho").textContent = a.deadline;
+  $("payerBal").textContent = fmt(wallets.payer);
+  $("vaultBal").textContent = fmt(a.vault);
+  $("payeeBal").textContent = fmt(wallets.payee);
+  const body = $("msBody");
+  body.innerHTML = "";
+  a.milestones.forEach((m, i) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = "<td>" + (i + 1) + "</td><td>" + fmt(m.amount) + "</td><td>" +
+      (m.delivered ? "yes" : "no") + "</td><td>" + (m.released ? "yes" : "no") + "</td>";
+    const td = document.createElement("td");
+    const b1 = document.createElement("button");
+    b1.textContent = "Mark delivered"; b1.type = "button";
+    b1.onclick = () => act("mark_delivered(" + i + ")", () => tplMarkDelivered(agreement, $("actor").value, i));
+    const b2 = document.createElement("button");
+    b2.textContent = "Approve & release"; b2.type = "button";
+    b2.onclick = () => act("approve(" + i + ")", () => tplApprove(agreement, $("actor").value, i));
+    td.append(b1, document.createTextNode(" "), b2);
+    tr.append(td);
+    body.append(tr);
+  });
+}
+function act(name, fn) {
+  if (!agreement) { reject(name + ": no agreement exists yet"); return; }
+  try { fn(); log(name + " by " + $("actor").value); }
+  catch (e) { reject(name + ": " + e.message); }
+  render();
+}
+
+$("createBtn").onclick = () => {
+  try {
+    const amounts = $("milestones").value.split(",").map(s => Math.round(parseFloat(s.trim()) * MICRO)).filter(n => !Number.isNaN(n));
+    agreement = tplNew($("payeeName").value.trim() || "payee", amounts, parseInt($("deadline").value, 10));
+    wallets = { payer: 1000 * MICRO, payee: 0 };
+    $("createMsg").innerHTML = " <span class='ok'>Agreement created. The creator is the payer.</span>";
+    log("new agreement: " + agreement.milestones.length + " milestones, deadline epoch " + agreement.deadline);
+  } catch (e) {
+    $("createMsg").innerHTML = " <span class='bad'>Rejected: " + e.message + "</span>";
+    log("create: " + e.message, true);
+  }
+  render();
+};
+$("advanceEpoch").onclick = () => { epoch += 1; log("epoch advanced to " + epoch); render(); };
+$("fundBtn").onclick = () => act("fund", () => tplFund(agreement, $("actor").value, Math.round(parseFloat($("fundAmt").value) * MICRO) || 0));
+$("refundBtn").onclick = () => act("refund", () => { const amt = tplRefund(agreement, $("actor").value); log("refunded " + fmt(amt) + " to the client"); });
+$("cancelBtn").onclick = () => act("cancel", () => tplCancel(agreement, $("actor").value));
+render();
+</script>
+</body>
+</html>

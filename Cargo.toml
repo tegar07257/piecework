@@ -1,0 +1,24 @@
+[package]
+name = "piecework"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "PieceWork — milestone escrow for freelance work on Tari Ootle"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+tari_template_lib = "0.41"
+
+[dev-dependencies]
+tari_template_test_tooling = "0.54"
+tari_ootle_transaction = "0.54"
+tari_engine_types = "0.54"
+tari_ootle_common_types = "0.54"
+tari_crypto = "0.24"
+ootle_byte_type = { version = "0.21", features = ["crypto"] }
+
+[profile.release]
+opt-level = "s"
+lto = true

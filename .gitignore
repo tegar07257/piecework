@@ -1,0 +1,5 @@
+/target
+*.db
+wallet-data/
+seed-words.txt
+*-wallet.json
